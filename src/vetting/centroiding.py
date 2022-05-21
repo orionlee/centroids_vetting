@@ -451,3 +451,51 @@ def centroid_test(
         r["pvalues_y"].append(tuple(pvalues_y))
 
     return r
+
+
+import statsmodels.stats.power as smp
+
+def print_power_analysis(lc, power_required=0.8, alpha_required=0.05):
+    """Check whether the sample sizes (of out-of-transit and in-transits) is adequate
+    for the student t-test to have sufficient statistical power.
+
+    It calculates the minimal effect, i.e., difference of mean centroid position between OOT and in-transit
+    the t-test can (soundly) suggests there are centroidly difference, and compare it with the actual difference.
+    """
+
+    tmasks = np.asarray([lc[f"tmask{i}"] for i in range(lc.meta["num_tmasks"])])
+    label = f"{lc.meta.get('LABEL', '')}, Sector {lc.meta.get('SECTOR')}"  # LATER: make _label() support lc
+    print(f"Power Analysis for {label}:")
+    oot_mask = tmasks.all(axis=0)
+    oot_lc = lc[oot_mask]
+    oot_size = len(oot_lc)
+    oot_x_err = np.mean(oot_lc.xcent_err)
+    oot_y_err = np.mean(oot_lc.ycent_err)
+    oot_x = np.mean(oot_lc.xcent_diff)
+    oot_y = np.mean(oot_lc.ycent_diff)
+    print(f"  OOT sample size size: {oot_size} ; col err: {oot_x_err}px, row err: {oot_y_err}px")
+
+    for idx in range(len(tmasks)):
+        # Transits of planet IDX
+        it_mask = ~tmasks[idx]
+
+        it_lc = lc[it_mask]
+        it_size = len(it_lc)
+        it_x = np.mean(it_lc.xcent_diff)
+        it_y = np.mean(it_lc.ycent_diff)
+
+        power_analysis = smp.TTestIndPower()
+        # OPEN: the power analysis assumes we only run t-test once, but in reality,
+        # the code runs the t-test 100 (based on `nsamp`) times with generated centroid (randomized based on the actual observation+error). Therefore
+        # - if the analysis says the test does not have the power, it might still have sufficient power.
+        # - if the analysis says the test does have the power, it definitely has sufficient power.
+        effect_size_in_sigma_of_test =  power_analysis.solve_power(nobs1=oot_size, ratio=it_size/oot_size, power=power_required, alpha=alpha_required)
+#         ratio_to_it = power_analysis.solve_power(effect_size=effect_size_in_sigma_required, nobs1=oot_size, ratio=None, power=power_required, alpha=alpha_required)
+#         it_adequate_size = oot_size * ratio_to_it
+        diff_x_sigma = np.abs(oot_x - it_x) / oot_x_err
+        diff_y_sigma = np.abs(oot_y - it_y) / oot_y_err
+
+        print(f"  Pl {idx+1} sample size: {it_size}")
+        print(f"    - has adequate power for simga diff of: {effect_size_in_sigma_of_test}")
+        print(f"    - actual col sigma diff: {diff_x_sigma} ; valid: {diff_x_sigma >= effect_size_in_sigma_of_test}")
+        print(f"    - actual row sigma diff: {diff_y_sigma} ; valid: {diff_y_sigma >= effect_size_in_sigma_of_test}")
